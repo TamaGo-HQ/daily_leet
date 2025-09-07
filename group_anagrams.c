@@ -1,78 +1,127 @@
-/**
- * Return an array of arrays of size *returnSize.
- * The sizes of the arrays are returned as *returnColumnSizes array.
- * Note: Both returned array and *columnSizes array must be malloced, assume caller calls free().
- */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
 
-typedef struct word{
-    int key;
-    float value;
+#define TABLE_SIZE 10007  // big prime number for hashing
+
+// Node to store an index
+typedef struct idx {
     int idx;
-    struct word* next;
-}word_t;
+    struct idx* next;
+} idx_t;
 
-typedef struct hashmap{
-    word_t* map;
-}hashmap_t;
+// Hashmap element
+typedef struct element {
+    long long key;       // encoded key as integer
+    int count;           // number of indices
+    idx_t* idx_list;     // linked list of indices
+    struct element* next; // for collision chaining
+} element_t;
 
-// Hash a float into an integer
-unsigned int hash_float(float key, unsigned int table_size) {
-    // Scale the float to preserve some precision
-    long int_repr = (long)(key * 1000000); // multiply by 1e6
-    // Simple modulo hash
-    return (unsigned int)(int_repr % table_size);
+// Hashmap
+typedef struct {
+    element_t* table[TABLE_SIZE];
+} hashmap_t;
+
+// Log-prime map (we scale to integer)
+double prime_log_map[26];
+
+// Initialize log-prime map
+void init_prime_log_map() {
+    int primes[26] = {
+        2, 3, 5, 7, 11, 13, 17, 19, 23, 29,
+        31, 37, 41, 43, 47, 53, 59, 61, 67,
+        71, 73, 79, 83, 89, 97, 101
+    };
+    for (int i = 0; i < 26; i++)
+        prime_log_map[i] = log(primes[i]);
+}
+
+// Encode word into a long long key using log-prime scaled to int
+long long encode_word_log_int(const char* word) {
+    long long sum = 0;
+    for (int i = 0; word[i]; i++) {
+        char c = word[i] | 32; // tolower
+        if (c >= 'a' && c <= 'z')
+            sum += (long long)(prime_log_map[c - 'a'] * 1e9); // scale to integer
+    }
+    return sum;
+}
+
+// Hash a long long into table index
+unsigned int hash_long_long(long long key) {
+    long long mod = key % TABLE_SIZE;
+    if (mod < 0) mod += TABLE_SIZE;
+    return (unsigned int)mod;
 }
 
 // Create a new hashmap
-HashMap* create_hashmap() {
-    HashMap* map = (HashMap*)malloc(sizeof(HashMap));
-    for (int i = 0; i < TABLE_SIZE; i++) {
+hashmap_t* create_hashmap() {
+    hashmap_t* map = malloc(sizeof(hashmap_t));
+    for (int i = 0; i < TABLE_SIZE; i++)
         map->table[i] = NULL;
-    }
     return map;
 }
 
-void put_hashmap(HashMap_t* map, Element_t* element){
-    unsigned int idx = hash(element->key);
-    Element_t* cur = map->table[idx];
-    if (cur == NULL){
-        map->table[idx] = element;
-    } else {
-    // chaining: insert at the beginning
-    element->next = cur;
-    map->table[idx] = element;
+// Insert into hashmap
+void hashmap_put(hashmap_t* map, long long key, int str_idx) {
+    unsigned int hash_idx = hash_long_long(key);
+    element_t* cur = map->table[hash_idx];
+
+    // Look for existing key
+    while (cur) {
+        if (cur->key == key) break; // exact integer comparison
+        cur = cur->next;
     }
+
+    if (!cur) {
+        cur = malloc(sizeof(element_t));
+        cur->key = key;
+        cur->count = 0;
+        cur->idx_list = NULL;
+        cur->next = map->table[hash_idx];
+        map->table[hash_idx] = cur;
+    }
+
+    idx_t* new_idx = malloc(sizeof(idx_t));
+    new_idx->idx = str_idx;
+    new_idx->next = cur->idx_list;
+    cur->idx_list = new_idx;
+    cur->count++;
 }
 
-// Map letters to numbers: a=1, b=2, ..., z=26
-int letter_to_value(char c) {
-    c = tolower(c);
-    if (c < 'a' || c > 'z') return 1; // default value for non-letters
-    return c - 'a' + 1;
-}
+// Group anagrams
+char*** groupAnagrams(char** strs, int strsSize, int* returnSize, int** returnColumnSizes) {
+    init_prime_log_map(); // initialize prime logs
+    hashmap_t* map = create_hashmap();
 
-// Encode word: 676 / first * second / third * fourth ...
-double encode_word_alt(const char *word) {
-    if (!word || word[0] == '\0') return 0.0;
+    // Insert all words into hashmap
+    for (int i = 0; i < strsSize; i++) {
+        long long key = encode_word_log_int(strs[i]);
+        hashmap_put(map, key, i);
+    }
 
-    double result = 676.0;
-    int divide_next = 1; // start with division
+    // Allocate maximum possible groups
+    char*** result = malloc(sizeof(char**) * strsSize);
+    *returnColumnSizes = malloc(sizeof(int) * strsSize);
+    *returnSize = 0;
 
-    for (int i = 0; word[i] != '\0'; i++) {
-        int val = letter_to_value(word[i]);
-        if (val == 0) val = 1; // avoid division by zero
+    // Build groups from hashmap
+    for (int i = 0; i < TABLE_SIZE; i++) {
+        element_t* cur = map->table[i];
+        while (cur) {
+            (*returnColumnSizes)[*returnSize] = cur->count;
+            result[*returnSize] = malloc(sizeof(char*) * cur->count);
 
-        if (divide_next)
-            result /= val;
-        else
-            result *= val;
+            int k = 0;
+            for (idx_t* n = cur->idx_list; n; n = n->next)
+                result[*returnSize][k++] = strs[n->idx];
 
-        divide_next = !divide_next; // alternate
+            (*returnSize)++;
+            cur = cur->next;
+        }
     }
 
     return result;
-}
-
-char*** groupAnagrams(char** strs, int strsSize, int* returnSize, int** returnColumnSizes) {
-
 }
